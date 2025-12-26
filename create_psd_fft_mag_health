@@ -1,0 +1,114 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.signal import welch   # فقط welch را از scipy می‌گیریم
+
+# ==============================
+#  تنظیمات
+# ==============================
+
+file = "second_test_data_clean_RPM_2507_Torque_25%.csv"     # نام فایل اکسل
+time_col = "time"      # نام ستون زمان
+sensor_cols = ["sensor_1","sensor_2","sensor_3","sensor_4","sensor_5","sensor_6"]   # نام ستون سنسورها
+
+rpm = 2507
+f_rot = rpm / 60.0   # فرکانس دوران (Hz)
+print(f"Rotational Frequency = {f_rot:.3f} Hz")
+
+# اگر تعداد دندانه دنده را می‌دانی اینجا وارد کن
+teeth_main = None   # مثلا 27 — اگر نمی‌دانی None بگذار
+
+if teeth_main:
+    f_gmf = f_rot * teeth_main
+    print(f"Gear Mesh Frequency = {f_gmf:.3f} Hz")
+else:
+    f_gmf = None
+
+# ==============================
+#  خواندن داده
+# ==============================
+
+df = pd.read_csv(file)
+
+time = df[time_col].values
+dt = np.mean(np.diff(time))
+fs = 1/dt
+print(f"Sampling Frequency = {fs:.2f} Hz")
+
+# ==============================
+#  تابع RMS
+# ==============================
+
+def rms(x):
+    return np.sqrt(np.mean(x**2))
+
+# ==============================
+#  پردازش هر سنسور
+# ==============================
+
+for s in sensor_cols:
+
+    x = df[s].values
+    N = len(x)
+
+    # ---------- RMS ----------
+    x_rms = rms(x)
+    print(f"RMS({s}) = {x_rms:.6f}")
+
+    # ---------- FFT ----------
+    window = np.hanning(N)
+    xw = x * window
+
+    X = np.fft.rfft(xw)
+    freqs = np.fft.rfftfreq(N, d=dt)
+
+    mag = np.abs(X) * 2 / N   # نرمال‌سازی
+
+    # ---------- PSD ----------
+    f_psd, psd = welch(x, fs=fs, window='hann', nperseg=2048)
+
+    # ==========================
+    #  رسم نمودارها
+    # ==========================
+
+    plt.figure(figsize=(12,9))
+
+    # ---- Time Signal ----
+    plt.subplot(3,1,1)
+    plt.plot(time, x)
+    plt.title(f"Time Signal - {s}")
+    plt.xlabel("Time (s)")
+    plt.ylabel("Amplitude")
+    plt.grid()
+
+    # ---- FFT Spectrum ----
+    plt.subplot(3,1,2)
+    plt.semilogy(freqs, mag)
+    plt.title(f"FFT Spectrum - {s}")
+    plt.xlabel("Frequency (Hz)")
+    plt.ylabel("Magnitude")
+    plt.grid()
+
+    # خط فرکانس دوران
+    plt.axvline(f_rot, color='r', linestyle='--', label="Rotation Freq")
+
+    # خط فرکانس مش دنده (اگر موجود)
+    if f_gmf:
+        plt.axvline(f_gmf, color='g', linestyle='--', label="Gear Mesh")
+        # چند هارمونیک
+        for n in range(2,6):
+            plt.axvline(n*f_gmf, color='g', linestyle=':', alpha=0.6)
+
+    plt.legend()
+
+    # ---- PSD ----
+    plt.subplot(3,1,3)
+    plt.semilogy(f_psd, psd)
+    plt.title(f"Power Spectral Density - {s}")
+    plt.xlabel("Frequency (Hz)")
+    plt.legend()
+    plt.grid()
+    plt.ylabel("PSD")
+
+    plt.tight_layout()
+    plt.show()
