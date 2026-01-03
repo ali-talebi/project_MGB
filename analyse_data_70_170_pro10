@@ -1,0 +1,146 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.signal import welch, hilbert, find_peaks
+from scipy.fft import fft, fftfreq
+from scipy.stats import kurtosis
+
+# بارگذاری داده
+file_path = 'second_test_data_clean_RPM_2507_Torque_25%.csv'
+df = pd.read_csv(file_path)
+
+# انتخاب سیگنال از سنسور 2
+sensor_data = df["sensor_2"].values
+t = df["time"].values
+
+# نرخ نمونه‌برداری و محاسبه فاصله زمانی
+dt = np.mean(np.diff(t))
+Fs = 1 / dt
+print(f"Sampling frequency: {Fs} Hz")
+
+# 1. محاسبه PSD (چگالی طیفی توان) برای سیگنال سالم
+f, Pxx = welch(sensor_data, fs=Fs, nperseg=1024)
+
+# 2. محاسبه Envelope Spectrum با استفاده از تبدیل هیلبرت برای سیگنال سالم
+analytic_signal = hilbert(sensor_data)
+envelope = np.abs(analytic_signal)
+
+# 3. محاسبه FFT برای سیگنال سالم
+n = len(sensor_data)
+frequencies = fftfreq(n, dt)
+fft_values = fft(sensor_data)
+
+# محاسبه FFT برای Envelope سیگنال سالم
+envelope_fft = fft(envelope)
+
+# پیدا کردن پیک‌ها در نمودار PSD و Envelope Spectrum
+peaks_psd, _ = find_peaks(Pxx)
+peaks_envelope, _ = find_peaks(np.abs(envelope_fft[:n // 2]))  # فقط نیمه مثبت فرکانس
+peaks_fft, _ = find_peaks(np.abs(fft_values[:n // 2]))  # پیدا کردن پیک‌ها در FFT
+
+# اعمال تغییرات به سیگنال برای دندانه 3
+# فرض بر این است که فرکانس دندانه 3 برابر است با 3 * فرکانس شفت
+frequencies_dent = 3 * 19  # در اینجا 19 را به عنوان فرکانس دندانه در نظر می‌گیریم
+
+# اضافه کردن یک مقدار نویز بزرگتر به سیگنال برای ایجاد خرابی
+noise = np.random.normal(0, 3, size=n)  # نویز تصادفی برای ایجاد خرابی بیشتر
+sensor_data_faulty = np.copy(sensor_data)
+sensor_data_faulty += noise  # افزودن نویز به سیگنال
+
+# محاسبه PSD و FFT برای سیگنال معیوب
+f_faulty, Pxx_faulty = welch(sensor_data_faulty, fs=Fs, nperseg=1024)
+fft_values_faulty = fft(sensor_data_faulty)
+
+# پیدا کردن پیک‌ها در نمودار PSD و Envelope Spectrum برای سیگنال معیوب
+peaks_psd_faulty, _ = find_peaks(Pxx_faulty)
+peaks_envelope_faulty, _ = find_peaks(np.abs(fft(sensor_data_faulty)[:n // 2]))  # برای Envelope معیوب
+peaks_fft_faulty, _ = find_peaks(np.abs(fft_values_faulty[:n // 2]))  # برای FFT معیوب
+
+# شناسایی پیک‌هایی که در سیگنال سالم و معیوب متفاوت هستند
+different_peaks_psd = list(set(peaks_psd) - set(peaks_psd_faulty))
+different_peaks_fft = list(set(peaks_fft) - set(peaks_fft_faulty))
+
+# محاسبه شاخص‌ها برای سیگنال سالم
+RMS_original = np.sqrt(np.mean(sensor_data**2))  # محاسبه RMS
+kurtosis_original = kurtosis(sensor_data)  # محاسبه Kurtosis
+P2P_original = np.ptp(sensor_data)  # محاسبه Peak-to-Peak
+mean_original = np.mean(sensor_data)  # محاسبه میانگین
+
+# محاسبه شاخص‌ها برای سیگنال معیوب
+RMS_faulty = np.sqrt(np.mean(sensor_data_faulty**2))  # محاسبه RMS
+kurtosis_faulty = kurtosis(sensor_data_faulty)  # محاسبه Kurtosis
+P2P_faulty = np.ptp(sensor_data_faulty)  # محاسبه Peak-to-Peak
+mean_faulty = np.mean(sensor_data_faulty)  # محاسبه میانگین
+
+# رسم نمودارها
+fig, ax = plt.subplots(2, 2, figsize=(18, 15))  # 4 نمودار در یک پنجره (2x2)
+
+# نمودار PSD برای سیگنال سالم
+ax[0, 0].semilogy(f, Pxx, label="PSD (Original Signal)", color='b')
+ax[0, 0].plot(f[peaks_psd], Pxx[peaks_psd], 'ro', label="Common Peaks", color='r', markersize=5)
+ax[0, 0].plot(f[different_peaks_psd], Pxx[different_peaks_psd], 'go', label="Different Peaks", color='g', markersize=5)
+ax[0, 0].set_xlabel('Frequency [Hz]')
+ax[0, 0].set_ylabel('Power [dB]')
+ax[0, 0].set_title('Power Spectral Density (Original Signal)', fontsize=14)
+ax[0, 0].legend()
+ax[0, 0].grid(True)
+
+# نمودار FFT برای سیگنال سالم
+ax[0, 1].plot(frequencies[:n // 2], np.abs(fft_values[:n // 2]), label="FFT (Original Signal)", color='m')
+ax[0, 1].plot(frequencies[peaks_fft], np.abs(fft_values[:n // 2])[peaks_fft], 'ro', label="Common Peaks", color='purple', markersize=5)
+ax[0, 1].plot(frequencies[different_peaks_fft], np.abs(fft_values[:n // 2])[different_peaks_fft], 'go', label="Different Peaks", color='yellow', markersize=5)
+ax[0, 1].set_xlabel('Frequency [Hz]')
+ax[0, 1].set_ylabel('Amplitude')
+ax[0, 1].set_title('FFT (Original Signal)', fontsize=14)
+ax[0, 1].legend()
+ax[0, 1].grid(True)
+
+# نمودار PSD برای سیگنال معیوب
+ax[1, 0].semilogy(f_faulty, Pxx_faulty, label="PSD (Faulty Signal)", color='g')
+ax[1, 0].plot(f_faulty[peaks_psd_faulty], Pxx_faulty[peaks_psd_faulty], 'ro', label="Common Peaks", color='r', markersize=5)
+ax[1, 0].plot(f_faulty[different_peaks_psd], Pxx_faulty[different_peaks_psd], 'go', label="Different Peaks", color='purple', markersize=5)
+ax[1, 0].set_xlabel('Frequency [Hz]')
+ax[1, 0].set_ylabel('Power [dB]')
+ax[1, 0].set_title('Power Spectral Density (Faulty Signal)', fontsize=14)
+ax[1, 0].legend()
+ax[1, 0].grid(True)
+
+# نمودار FFT برای سیگنال معیوب
+ax[1, 1].plot(frequencies[:n // 2], np.abs(fft_values_faulty[:n // 2]), label="FFT (Faulty Signal)", color='c')
+ax[1, 1].plot(frequencies[peaks_fft_faulty], np.abs(fft_values_faulty[:n // 2])[peaks_fft_faulty], 'ro', label="Common Peaks", color='purple', markersize=5)
+ax[1, 1].plot(frequencies[different_peaks_fft], np.abs(fft_values_faulty[:n // 2])[different_peaks_fft], 'go', label="Different Peaks", color='orange', markersize=5)
+ax[1, 1].set_xlabel('Frequency [Hz]')
+ax[1, 1].set_ylabel('Amplitude')
+ax[1, 1].set_title('FFT (Faulty Signal)', fontsize=14)
+ax[1, 1].legend()
+ax[1, 1].grid(True)
+
+plt.tight_layout()  # به‌صورت خودکار فاصله‌ها را تنظیم می‌کند
+plt.show()
+
+# رسم مقایسه سیگنال اصلی و معیوب در زمان
+fig2, ax2 = plt.subplots(1, 2, figsize=(18, 6))  # پنجره جدید برای مقایسه سیگنال‌ها
+
+# سیگنال اصلی
+ax2[0].plot(t, sensor_data, label="Original Signal", color='b', alpha=0.7)
+ax2[0].set_xlabel('Time [s]')
+ax2[0].set_ylabel('Amplitude')
+ax2[0].set_title(f'Original Signal (Time Domain)\nRMS: {RMS_original:.4f}, Kurtosis: {kurtosis_original:.4f}\nPeak-to-Peak: {P2P_original:.4f}, Mean: {mean_original:.4f}', fontsize=14)
+ax2[0].legend()
+ax2[0].grid(True)
+
+# سیگنال معیوب
+ax2[1].plot(t, sensor_data_faulty, label="Faulty Signal", color='r', alpha=0.7)
+ax2[1].set_xlabel('Time [s]')
+ax2[1].set_ylabel('Amplitude')
+ax2[1].set_title(f'Faulty Signal (Time Domain)\nRMS: {RMS_faulty:.4f}, Kurtosis: {kurtosis_faulty:.4f}\nPeak-to-Peak: {P2P_faulty:.4f}, Mean: {mean_faulty:.4f}', fontsize=14)
+ax2[1].legend()
+ax2[1].grid(True)
+
+plt.tight_layout()  # تنظیم فاصله‌ها
+plt.show()
+
+# ذخیره سیگنال معیوب
+df_faulty = df.copy()
+df_faulty["sensor_2"] = sensor_data_faulty
+df_faulty.to_csv("faulty_signal.csv", index=False)
